@@ -28,35 +28,24 @@ Use Case 5: Write data to Kafka with no schema. See an example [here](docs/sink/
 
 ## FAQ
 
-### How do I configure logging level?
+### How do I configure logging?
 
-Set environment variables in your container spec. Default level is `INFO` if not specified.
+This application uses **SLF4J** with **Logback** for logging (via Lombok `@Slf4j`).
+
+The application ships with a `logback.xml` that defaults to `INFO` level and supports runtime configuration via the `ROOT_LOG_LEVEL` environment variable.
+
+#### How do I configure logging level?
+
+Set the `ROOT_LOG_LEVEL` environment variable in your container spec:
 
 ```yaml
 env:
-  # Set root level (affects all packages)
-  - name: LOGGING_LEVEL_ROOT
+  - name: ROOT_LOG_LEVEL
     value: "WARN"
-  # Set level for io.numaproj.kafka.consumer package
-  - name: LOGGING_LEVEL_IO_NUMAPROJ_KAFKA_CONSUMER
-    value: "DEBUG"
 ```
 
 Available levels: `TRACE`, `DEBUG`, `INFO` (default), `WARN`, `ERROR`, `OFF`
 
-### How do I enable structured logging (JSON)?
+#### How do I enable structured logging (JSON)?
 
-Structured logging is [supported](https://spring.io/blog/2024/08/23/structured-logging-in-spring-boot-3-4) out of the
-box. To enable it, set the following environment variable in your container
-spec:
-
-```yaml
-env:
-  - name: LOGGING_STRUCTURED_FORMAT_CONSOLE
-    value: "logstash"
-```
-
-| Value      | Format                |
-|------------|-----------------------|
-| `logstash` | Logstash JSON         |
-| `ecs`      | Elastic Common Schema |
+Add the `logstash-logback-encoder` dependency and configure a JSON encoder in your `logback.xml`. Refer to the [logstash-logback-encoder documentation](https://github.com/logfellow/logstash-logback-encoder) for dependency coordinates and encoder configuration.

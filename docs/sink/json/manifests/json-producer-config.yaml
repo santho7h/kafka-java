@@ -4,6 +4,12 @@ kind: ConfigMap
 metadata:
   name: json-producer-config
 data:
+  user.configuration.yaml: |
+    handler: producer
+    topicName: numagen-json
+    schemaType: json
+    schemaSubject: numagen-json-value
+    schemaVersion: 1
   producer.properties: |
     # Required connection configs for Kafka producer, consumer, and admin
     bootstrap.servers=[placeholder]
@@ -22,8 +28,3 @@ data:
     basic.auth.user.info=[placeholder]
     # Other configurations
     retries=0
-  user.configuration: |
-    topicName: numagen-json
-    schemaType: json
-    schemaSubject: numagen-json-value
-    schemaVersion: 1

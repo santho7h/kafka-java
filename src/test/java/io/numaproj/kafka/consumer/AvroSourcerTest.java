@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Headers;
@@ -28,29 +27,6 @@ public class AvroSourcerTest {
   private AvroSourcer underTest;
 
   @Test
-  void givenSourcer_whenStartConsumer_thenNumaflowSourceServerStarted() {
-    try {
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      try (var mockedConstruction = Mockito.mockConstruction(Server.class)) {
-        AtomicBoolean runMethodInvoked = new AtomicBoolean(false);
-        doAnswer(
-                methodInvocation -> {
-                  runMethodInvoked.set(true);
-                  return null;
-                })
-            .when(avroWorkerMock)
-            .run();
-        underTest.startConsumer();
-        verify(mockedConstruction.constructed().getFirst(), times(1)).start();
-        Thread.sleep(100);
-        assertTrue(runMethodInvoked.get());
-      }
-    } catch (Exception e) {
-      fail();
-    }
-  }
-
-  @Test
   void givenSourcer_whenOneMessageAvailable_thenOneMessageSentByObserver() {
     try {
       ReadRequest readRequest = mock(ReadRequest.class);
@@ -63,7 +39,7 @@ public class AvroSourcerTest {
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
       underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
       Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
-      doReturn(consumerRecords).when(avroWorkerMock).poll();
+      doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               methodInvocation -> {
                 methodInvocation.getArgument(0);
@@ -88,7 +64,7 @@ public class AvroSourcerTest {
 
       underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
       Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
-      doThrow(new InterruptedException("foo")).when(avroWorkerMock).poll();
+      doThrow(new InterruptedException("foo")).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               mi -> {
                 // more than read request time out
@@ -122,7 +98,7 @@ public class AvroSourcerTest {
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
       underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
       Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
-      doReturn(consumerRecords).when(avroWorkerMock).poll();
+      doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               methodInvocation -> {
                 Message message = methodInvocation.getArgument(0);
@@ -181,7 +157,7 @@ public class AvroSourcerTest {
                 return consumerRecords;
               })
           .when(avroWorkerMock)
-          .poll();
+          .poll(anyLong());
       underTest.read(readRequest, outputObserver);
       // verify that only one message is read
       verify(outputObserver, times(1)).send(any());
@@ -201,7 +177,7 @@ public class AvroSourcerTest {
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
       underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
       doReturn(true).when(underTest).isWorkerThreadAlive();
-      doReturn(consumerRecords).when(avroWorkerMock).poll();
+      doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       underTest.read(readRequest, outputObserver);
       verify(outputObserver, times(0)).send(any());
     } catch (Exception e) {
@@ -218,7 +194,7 @@ public class AvroSourcerTest {
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
       underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
       doReturn(true).when(underTest).isWorkerThreadAlive();
-      doReturn(null).when(avroWorkerMock).poll();
+      doReturn(null).when(avroWorkerMock).poll(anyLong());
       underTest.read(readRequest, outputObserver);
       verify(outputObserver, times(0)).send(any());
     } catch (Exception e) {

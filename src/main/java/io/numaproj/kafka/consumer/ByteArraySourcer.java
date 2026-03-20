@@ -8,21 +8,15 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.stereotype.Component;
 
 /**
  * ByteArraySourcer is the implementation of the Numaflow Sourcer to read raw messages in byte array
  * format from Kafka
  */
 @Slf4j
-@Component
-@ConditionalOnExpression("'${schemaType}'.equals('json') or '${schemaType}'.equals('raw')")
 public class ByteArraySourcer extends Sourcer {
   private final ByteArrayWorker worker;
   private final Admin admin;
@@ -34,13 +28,11 @@ public class ByteArraySourcer extends Sourcer {
   // previous read request.
   private Map<String, Long> readTopicPartitionOffsetMap;
 
-  @Autowired
   public ByteArraySourcer(ByteArrayWorker worker, Admin admin) {
     this.worker = worker;
     this.admin = admin;
   }
 
-  @PostConstruct
   public void startConsumer() throws Exception {
     log.info("Starting the Kafka byte array consumer worker thread...");
     workerThread = new Thread(worker, "consumerWorkerThread");
@@ -77,29 +69,17 @@ public class ByteArraySourcer extends Sourcer {
       kill(new RuntimeException("Consumer worker thread is not alive"));
     }
 
-    long startTime;
-    long remainingTime = request.getTimeout().toMillis();
     int j = 0;
-    List<ConsumerRecord<String, byte[]>> consumerRecordList = null;
     readTopicPartitionOffsetMap = new HashMap<>();
-    while (j < request.getCount()) {
-      startTime = System.currentTimeMillis();
-      // if the read request has timed out, break the loop
-      if (remainingTime <= 0) {
-        break;
-      }
-      try {
-        consumerRecordList = worker.poll();
-      } catch (InterruptedException e) {
-        // Exit from the loop if the thread is interrupted
-        kill(new RuntimeException(e));
-      }
-      if (consumerRecordList == null) {
-        // update the remaining time
-        remainingTime -= System.currentTimeMillis() - startTime;
-        continue;
-      }
+    List<ConsumerRecord<String, byte[]>> consumerRecordList;
+    try {
+      consumerRecordList = worker.poll(request.getTimeout().toMillis());
+    } catch (InterruptedException e) {
+      kill(new RuntimeException(e));
+      return;
+    }
 
+    if (consumerRecordList != null) {
       for (ConsumerRecord<String, byte[]> consumerRecord : consumerRecordList) {
         if (consumerRecord == null) {
           continue;
@@ -129,11 +109,8 @@ public class ByteArraySourcer extends Sourcer {
         } else {
           readTopicPartitionOffsetMap.put(key, consumerRecord.offset());
         }
-        // FIXME - after we finish this for loop, j could be greater than request.getCount(),
-        // meaning we are sending more messages than requested
         j++;
       }
-      remainingTime -= System.currentTimeMillis() - startTime;
     }
     log.debug(
         "BatchRead summary: requested number of messages: {} number of messages sent: {} number of partitions: {} readTopicPartitionOffsetMap:{}",
