@@ -4,7 +4,7 @@ kind: ConfigMap
 metadata:
   name: avro-producer-config
 data:
-  user.configuration.yaml: |
+  user.configuration: |
     handler: producer
     topicName: numagen-avro
     schemaType: avro

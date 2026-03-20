@@ -10,7 +10,7 @@ spec:
           configMap:
             name: raw-consumer-config
             items:
-              - key: user.configuration.yaml
+              - key: user.configuration
                 path: user.configuration.yaml
               - key: consumer.properties
                 path: consumer.properties

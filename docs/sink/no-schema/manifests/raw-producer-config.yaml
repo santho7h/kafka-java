@@ -4,7 +4,7 @@ kind: ConfigMap
 metadata:
   name: raw-producer-config
 data:
-  user.configuration.yaml: |
+  user.configuration: |
     handler: producer
     topicName: numagen-raw
     schemaType: raw

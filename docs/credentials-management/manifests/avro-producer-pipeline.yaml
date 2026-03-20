@@ -18,7 +18,7 @@ spec:
           configMap:
             name: avro-producer-config
             items:
-              - key: user.configuration.yaml
+              - key: user.configuration
                 path: user.configuration.yaml
               - key: producer.properties
                 path: producer.properties

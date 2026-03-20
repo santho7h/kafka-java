@@ -4,7 +4,7 @@ kind: ConfigMap
 metadata:
   name: raw-consumer-config
 data:
-  user.configuration.yaml: |
+  user.configuration: |
     handler: consumer
     topicName: numagen-raw
     schemaType: raw
