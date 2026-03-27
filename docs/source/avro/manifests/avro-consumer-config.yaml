@@ -4,10 +4,6 @@ kind: ConfigMap
 metadata:
   name: avro-consumer-config
 data:
-  user.configuration: |
-    handler: consumer
-    topicName: numagen-avro
-    schemaType: avro
   consumer.properties: |
     # Required connection configs for Kafka producer, consumer, and admin
     bootstrap.servers=[placeholder]
@@ -27,3 +23,6 @@ data:
     retries=0
     # group.id is required for consumer clients
     group.id=group1
+  user.configuration: |
+    topicName: numagen-avro
+    schemaType: avro

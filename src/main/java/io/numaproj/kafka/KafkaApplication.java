@@ -24,23 +24,47 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class KafkaApplication {
 
+  private static final String ARG_CONFIG = "--config=";
+  private static final String ARG_PREFIX = "--";
+
+  private static final String KEY_HANDLER = "handler";
+  private static final String KEY_PRODUCER_PROPERTIES_PATH = "producer.properties.path";
+  private static final String KEY_CONSUMER_PROPERTIES_PATH = "consumer.properties.path";
+  private static final String KEY_TOPIC_NAME = "topicName";
+  private static final String KEY_SCHEMA_TYPE = "schemaType";
+  private static final String KEY_SCHEMA_SUBJECT = "schemaSubject";
+  private static final String KEY_SCHEMA_VERSION = "schemaVersion";
+
+  private static final String HANDLER_CONSUMER = "consumer";
+  private static final String HANDLER_PRODUCER = "producer";
+  private static final String SCHEMA_TYPE_AVRO = "avro";
+  private static final String SCHEMA_TYPE_JSON = "json";
+
   public static void main(String[] args) throws Exception {
     // TODO - validate the arguments, cannot enable both consumer and producer
     log.info("Supplied arguments: {}", (Object) args);
     Map<String, String> argMap = parseArgs(args);
 
-    String handler = argMap.get("handler");
+    String handler = argMap.get(KEY_HANDLER);
     if (handler == null || handler.isBlank()) {
-      throw new IllegalArgumentException(
-          "--handler=[consumer|producer] is required");
+      // Infer handler from which properties arg is present for backward compatibility
+      if (argMap.containsKey(KEY_PRODUCER_PROPERTIES_PATH)) {
+        handler = HANDLER_PRODUCER;
+      } else if (argMap.containsKey(KEY_CONSUMER_PROPERTIES_PATH)) {
+        handler = HANDLER_CONSUMER;
+      } else {
+        throw new IllegalArgumentException(
+            "--handler=[consumer|producer] is required, or pass --producer.properties.path / --consumer.properties.path");
+      }
+      log.info("Handler inferred as '{}' from properties path argument", handler);
     }
 
     UserConfig userConfig = buildUserConfig(argMap);
     log.info("UserConfig: {}", userConfig);
 
     switch (handler.toLowerCase()) {
-      case "consumer" -> startConsumer(argMap, userConfig);
-      case "producer" -> startProducer(argMap, userConfig);
+      case HANDLER_CONSUMER -> startConsumer(argMap, userConfig);
+      case HANDLER_PRODUCER -> startProducer(argMap, userConfig);
       default ->
           throw new IllegalArgumentException(
               "Unknown handler: " + handler + ". Must be 'consumer' or 'producer'");
@@ -49,7 +73,7 @@ public class KafkaApplication {
 
   private static void startConsumer(Map<String, String> argMap, UserConfig userConfig)
       throws Exception {
-    String consumerPropertiesPath = argMap.get("consumer.properties.path");
+    String consumerPropertiesPath = argMap.get(KEY_CONSUMER_PROPERTIES_PATH);
     if (consumerPropertiesPath == null) {
       throw new IllegalArgumentException(
           "--consumer.properties.path is required for consumer mode");
@@ -61,25 +85,23 @@ public class KafkaApplication {
     Admin admin = new Admin(userConfig, groupId, adminClient);
 
     String schemaType = userConfig.getSchemaType();
-    if ("avro".equals(schemaType)) {
+    if (SCHEMA_TYPE_AVRO.equals(schemaType)) {
       var kafkaConsumer = consumerConfig.kafkaAvroConsumer();
       AvroWorker worker = new AvroWorker(userConfig, kafkaConsumer);
       AvroSourcer sourcer = new AvroSourcer(worker, admin);
-      addConsumerShutdownHook(worker::shutdown, admin);
       sourcer.startConsumer();
     } else {
       // json or raw
       var kafkaConsumer = consumerConfig.kafkaByteArrayConsumer();
       ByteArrayWorker worker = new ByteArrayWorker(userConfig, kafkaConsumer);
       ByteArraySourcer sourcer = new ByteArraySourcer(worker, admin);
-      addConsumerShutdownHook(worker::shutdown, admin);
       sourcer.startConsumer();
     }
   }
 
   private static void startProducer(Map<String, String> argMap, UserConfig userConfig)
       throws Exception {
-    String producerPropertiesPath = argMap.get("producer.properties.path");
+    String producerPropertiesPath = argMap.get(KEY_PRODUCER_PROPERTIES_PATH);
     if (producerPropertiesPath == null) {
       throw new IllegalArgumentException(
           "--producer.properties.path is required for producer mode");
@@ -88,62 +110,35 @@ public class KafkaApplication {
     ProducerConfig producerConfig = new ProducerConfig(producerPropertiesPath);
     String schemaType = userConfig.getSchemaType();
 
-    if ("avro".equals(schemaType)) {
+    if (SCHEMA_TYPE_AVRO.equals(schemaType)) {
       var kafkaProducer = producerConfig.kafkaAvroProducer();
       var schemaRegistryClient = producerConfig.schemaRegistryClient();
       Registry registry = producerConfig.schemaRegistry(schemaRegistryClient);
-      KafkaAvroSinker sinker = new KafkaAvroSinker(userConfig, kafkaProducer, registry);
-      Runtime.getRuntime()
-          .addShutdownHook(
-              new Thread(
-                  () -> {
-                    try {
-                      sinker.close();
-                    } catch (Exception e) {
-                      log.error("Error closing avro sinker during shutdown", e);
-                    }
-                  }));
-      sinker.startSinker();
-    } else if ("json".equals(schemaType)) {
+      new KafkaAvroSinker(userConfig, kafkaProducer, registry).startSinker();
+    } else if (SCHEMA_TYPE_JSON.equals(schemaType)) {
       var kafkaProducer = producerConfig.kafkaByteArrayProducer();
       var schemaRegistryClient = producerConfig.schemaRegistryClient();
       Registry registry = producerConfig.schemaRegistry(schemaRegistryClient);
-      KafkaJsonSinker sinker = new KafkaJsonSinker(userConfig, kafkaProducer, registry);
-      Runtime.getRuntime()
-          .addShutdownHook(
-              new Thread(
-                  () -> {
-                    try {
-                      sinker.close();
-                    } catch (Exception e) {
-                      log.error("Error closing json sinker during shutdown", e);
-                    }
-                  }));
-      sinker.startSinker();
+      new KafkaJsonSinker(userConfig, kafkaProducer, registry).startSinker();
     } else {
       // raw
       var kafkaProducer = producerConfig.kafkaByteArrayProducer();
-      KafkaByteArraySinker sinker = new KafkaByteArraySinker(userConfig, kafkaProducer);
-      Runtime.getRuntime()
-          .addShutdownHook(
-              new Thread(
-                  () -> sinker.close()));
-      sinker.startSinker();
+      new KafkaByteArraySinker(userConfig, kafkaProducer).startSinker();
     }
   }
 
   private static UserConfig buildUserConfig(Map<String, String> argMap) {
-    String topicName = argMap.get("topicName");
+    String topicName = argMap.get(KEY_TOPIC_NAME);
     if (topicName == null || topicName.isBlank()) {
       throw new IllegalArgumentException("--topicName is required");
     }
-    String schemaType = argMap.get("schemaType");
+    String schemaType = argMap.get(KEY_SCHEMA_TYPE);
     if (schemaType == null || schemaType.isBlank()) {
       throw new IllegalArgumentException(
           "--schemaType is required (avro, json, or raw)");
     }
-    String schemaSubject = argMap.getOrDefault("schemaSubject", "");
-    int schemaVersion = Integer.parseInt(argMap.getOrDefault("schemaVersion", "0"));
+    String schemaSubject = argMap.getOrDefault(KEY_SCHEMA_SUBJECT, "");
+    int schemaVersion = Integer.parseInt(argMap.getOrDefault(KEY_SCHEMA_VERSION, "0"));
     return UserConfig.builder()
         .topicName(topicName)
         .schemaType(schemaType)
@@ -152,36 +147,17 @@ public class KafkaApplication {
         .build();
   }
 
-  @FunctionalInterface
-  private interface WorkerShutdown {
-    void shutdown() throws InterruptedException;
-  }
-
-  private static void addConsumerShutdownHook(WorkerShutdown workerShutdown, Admin admin) {
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  try {
-                    workerShutdown.shutdown();
-                  } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                  }
-                  admin.close();
-                }));
-  }
-
   private static Map<String, String> parseArgs(String[] args) {
     Map<String, String> map = new HashMap<>();
     String configPath = null;
 
     for (String arg : args) {
-      if (arg.startsWith("--config=")) {
-        configPath = arg.substring("--config=".length());
-      } else if (arg.startsWith("--")) {
+      if (arg.startsWith(ARG_CONFIG)) {
+        configPath = arg.substring(ARG_CONFIG.length());
+      } else if (arg.startsWith(ARG_PREFIX)) {
         int eq = arg.indexOf('=');
         if (eq > 0) {
-          map.put(arg.substring(2, eq), arg.substring(eq + 1));
+          map.put(arg.substring(ARG_PREFIX.length(), eq), arg.substring(eq + 1));
         }
       }
     }

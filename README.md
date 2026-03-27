@@ -26,6 +26,17 @@ example [here](docs/sink/json/json-sink.md).
 
 Use Case 5: Write data to Kafka with no schema. See an example [here](docs/sink/no-schema/no-schema-sink.md).
 
+## Upgrading from a Spring Boot version?
+
+If you are upgrading from a Spring Boot-based release, update the **image tag** and make the following changes to your
+pipeline and config specifications:
+
+- Replace `--spring.config.location=file:/conf/user.configuration.yaml` with `--config=/conf/user.configuration.yaml`.
+- The `handler` field in your config YAML is no longer required. Remove it — the handler is inferred automatically
+  from the properties path argument (`--consumer.properties.path` or `--producer.properties.path`).
+- Spring Boot `LOGGING_LEVEL_*` environment variables are **no longer supported**. See the logging FAQ below for the
+  new approach.
+
 ## FAQ
 
 ### How do I configure logging?

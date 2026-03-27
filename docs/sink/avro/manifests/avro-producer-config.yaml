@@ -4,12 +4,6 @@ kind: ConfigMap
 metadata:
   name: avro-producer-config
 data:
-  user.configuration: |
-    handler: producer
-    topicName: numagen-avro
-    schemaType: avro
-    schemaSubject: numagen-avro-value
-    schemaVersion: 1
   producer.properties: |
     # Required connection configs for Kafka producer, consumer, and admin
     bootstrap.servers=[placeholder]
@@ -28,3 +22,8 @@ data:
     basic.auth.user.info=[placeholder]
     # Other configurations
     retries=0
+  user.configuration: |
+    topicName: numagen-avro
+    schemaType: avro
+    schemaSubject: numagen-avro-value
+    schemaVersion: 1

@@ -4,10 +4,6 @@ kind: ConfigMap
 metadata:
   name: raw-producer-config
 data:
-  user.configuration: |
-    handler: producer
-    topicName: numagen-raw
-    schemaType: raw
   producer.properties: |
     # Required connection configs for Kafka producer, consumer, and admin
     bootstrap.servers=[placeholder]
@@ -22,3 +18,6 @@ data:
     acks=all
     # Other configurations
     retries=0
+  user.configuration: |
+    topicName: numagen-raw
+    schemaType: raw

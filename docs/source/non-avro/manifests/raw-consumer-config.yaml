@@ -4,10 +4,6 @@ kind: ConfigMap
 metadata:
   name: raw-consumer-config
 data:
-  user.configuration: |
-    handler: consumer
-    topicName: numagen-raw
-    schemaType: raw
   consumer.properties: |
     # Required connection configs for Kafka producer, consumer, and admin
     bootstrap.servers=[placeholder]
@@ -22,3 +18,6 @@ data:
     retries=0
     # group.id is required for consumer clients
     group.id=group1
+  user.configuration: |
+    topicName: numagen-raw
+    schemaType: raw
