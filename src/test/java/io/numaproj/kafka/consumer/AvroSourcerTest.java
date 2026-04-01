@@ -26,6 +26,15 @@ public class AvroSourcerTest {
 
   private AvroSourcer underTest;
 
+  /** Helper: creates a spy sourcer with the mock worker pre-injected so lazy init is skipped. */
+  private AvroSourcer spyWithWorker() {
+    AvroSourcer sourcer = Mockito.spy(new AvroSourcer(null, null, adminMock));
+    Thread aliveThread = mock(Thread.class);
+    when(aliveThread.isAlive()).thenReturn(true);
+    sourcer.setWorker(avroWorkerMock, aliveThread);
+    return sourcer;
+  }
+
   @Test
   void givenSourcer_whenOneMessageAvailable_thenOneMessageSentByObserver() {
     try {
@@ -37,8 +46,7 @@ public class AvroSourcerTest {
           new ConsumerRecord<>("foo", 1, 1, "bar", generateTestData());
       consumerRecords.add(consumerRecord);
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
+      underTest = spyWithWorker();
       doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               methodInvocation -> {
@@ -62,8 +70,7 @@ public class AvroSourcerTest {
       when(readRequest.getTimeout()).thenReturn(Duration.ofMillis(100));
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
 
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
+      underTest = spyWithWorker();
       doThrow(new InterruptedException("foo")).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               mi -> {
@@ -96,8 +103,7 @@ public class AvroSourcerTest {
       cr.headers().add("foo", "bar".getBytes());
       consumerRecords.add(cr);
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      Mockito.doReturn(true).when(underTest).isWorkerThreadAlive();
+      underTest = spyWithWorker();
       doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       doAnswer(
               methodInvocation -> {
@@ -119,8 +125,11 @@ public class AvroSourcerTest {
   void givenSourcerRead_whenWorkerThreadIsNotAlive_thenKillInvoked() {
     ReadRequest readRequest = mock(ReadRequest.class);
     when(readRequest.getCount()).thenReturn(1L);
-    underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-    doReturn(false).when(underTest).isWorkerThreadAlive();
+    when(readRequest.getTimeout()).thenReturn(Duration.ofMillis(100));
+    underTest = Mockito.spy(new AvroSourcer(null, null, adminMock));
+    Thread deadThread = mock(Thread.class);
+    when(deadThread.isAlive()).thenReturn(false);
+    underTest.setWorker(avroWorkerMock, deadThread);
     doAnswer(
             mi -> {
               // more than read request time out
@@ -137,13 +146,12 @@ public class AvroSourcerTest {
   void givenSourcerRead_whenReadTimeout_thenDoNotReadMore() {
     try {
       ReadRequest readRequest = mock(ReadRequest.class);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+      underTest = spyWithWorker();
 
       when(readRequest.getCount()).thenReturn(2L);
       // set timeout to 100 milliseconds
       when(readRequest.getTimeout()).thenReturn(Duration.ofMillis(100));
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
-      doReturn(true).when(underTest).isWorkerThreadAlive();
 
       doAnswer(
               methodInvocation -> {
@@ -175,8 +183,7 @@ public class AvroSourcerTest {
       List<ConsumerRecord<String, GenericRecord>> consumerRecords = new ArrayList<>();
       consumerRecords.add(null);
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      doReturn(true).when(underTest).isWorkerThreadAlive();
+      underTest = spyWithWorker();
       doReturn(consumerRecords).when(avroWorkerMock).poll(anyLong());
       underTest.read(readRequest, outputObserver);
       verify(outputObserver, times(0)).send(any());
@@ -192,8 +199,7 @@ public class AvroSourcerTest {
       when(readRequest.getCount()).thenReturn(1L);
       when(readRequest.getTimeout()).thenReturn(Duration.ofMillis(100));
       OutputObserver outputObserver = Mockito.mock(OutputObserver.class);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
-      doReturn(true).when(underTest).isWorkerThreadAlive();
+      underTest = spyWithWorker();
       doReturn(null).when(avroWorkerMock).poll(anyLong());
       underTest.read(readRequest, outputObserver);
       verify(outputObserver, times(0)).send(any());
@@ -205,7 +211,7 @@ public class AvroSourcerTest {
   @Test
   void givenSourcerAck_whenAckRequestReceived_thenWorkerCommit() {
     try {
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+      underTest = spyWithWorker();
       String offsetValue = "test-topic" + ":" + 1;
       Offset offset = new Offset(offsetValue.getBytes(StandardCharsets.UTF_8), 10);
       List<Offset> offsets = new ArrayList<>();
@@ -229,7 +235,7 @@ public class AvroSourcerTest {
     try {
       Map<String, Long> readTopicPartionMap = new HashMap<>();
       readTopicPartionMap.put("test-topic:10", 100L);
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+      underTest = spyWithWorker();
       underTest.setReadTopicPartitionOffsetMap(readTopicPartionMap);
       // the requested offset doesn't exist in readTopicPartitionOffsetMap, which indicates that
       // the ack is out of sync with the previous read
@@ -255,7 +261,7 @@ public class AvroSourcerTest {
   @Test
   void givenSourcerAck_whenAckInterrupted_sourcerKilled() {
     try {
-      underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+      underTest = spyWithWorker();
       doThrow(new InterruptedException("foo")).when(avroWorkerMock).commit();
       String offsetValue = "test-topic" + ":" + 1;
       Offset offset = new Offset(offsetValue.getBytes(StandardCharsets.UTF_8), 10);
@@ -279,7 +285,7 @@ public class AvroSourcerTest {
 
   @Test
   void givenSourcer_whenGetPending_thenAdminReturnPendingCount() {
-    underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+    underTest = spyWithWorker();
     doReturn(100L).when(adminMock).getPendingMessages();
     long count = underTest.getPending();
     assertEquals(100L, count);
@@ -287,7 +293,7 @@ public class AvroSourcerTest {
 
   @Test
   void givenSourcer_whenGetPartitions_thenWorkerReturnPartitions() {
-    underTest = Mockito.spy(new AvroSourcer(avroWorkerMock, adminMock));
+    underTest = spyWithWorker();
     doReturn(List.of(1)).when(avroWorkerMock).getPartitions();
     underTest.getPartitions();
     verify(avroWorkerMock, times(1)).getPartitions();

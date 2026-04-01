@@ -8,9 +8,7 @@ import io.numaproj.kafka.config.ProducerConfig;
 import io.numaproj.kafka.config.UserConfig;
 import io.numaproj.kafka.consumer.Admin;
 import io.numaproj.kafka.consumer.AvroSourcer;
-import io.numaproj.kafka.consumer.AvroWorker;
 import io.numaproj.kafka.consumer.ByteArraySourcer;
-import io.numaproj.kafka.consumer.ByteArrayWorker;
 import io.numaproj.kafka.producer.KafkaAvroSinker;
 import io.numaproj.kafka.producer.KafkaByteArraySinker;
 import io.numaproj.kafka.producer.KafkaJsonSinker;
@@ -86,15 +84,11 @@ public class KafkaApplication {
 
     String schemaType = userConfig.getSchemaType();
     if (SCHEMA_TYPE_AVRO.equals(schemaType)) {
-      var kafkaConsumer = consumerConfig.kafkaAvroConsumer();
-      AvroWorker worker = new AvroWorker(userConfig, kafkaConsumer);
-      AvroSourcer sourcer = new AvroSourcer(worker, admin);
+      AvroSourcer sourcer = new AvroSourcer(consumerConfig, userConfig, admin);
       sourcer.startConsumer();
     } else {
       // json or raw
-      var kafkaConsumer = consumerConfig.kafkaByteArrayConsumer();
-      ByteArrayWorker worker = new ByteArrayWorker(userConfig, kafkaConsumer);
-      ByteArraySourcer sourcer = new ByteArraySourcer(worker, admin);
+      ByteArraySourcer sourcer = new ByteArraySourcer(consumerConfig, userConfig, admin);
       sourcer.startConsumer();
     }
   }

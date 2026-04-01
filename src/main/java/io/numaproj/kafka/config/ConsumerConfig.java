@@ -12,6 +12,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.KafkaAdminClient;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
 
 /** Factory for Kafka consumer clients and admin client */
 @Slf4j
@@ -35,7 +40,7 @@ public class ConsumerConfig {
     EnvVarInterpolator.interpolate(props);
 
     var groupId =
-        props.getOrDefault(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG, null);
+        props.getOrDefault(GROUP_ID_CONFIG, null);
     if (groupId == null || StringUtils.isBlank((String) groupId)) {
       throw new IllegalArgumentException("group.id is mandatory for Kafka consumer");
     }
@@ -44,7 +49,7 @@ public class ConsumerConfig {
   }
 
   // Kafka Avro consumer client
-  public KafkaConsumer<String, GenericRecord> kafkaAvroConsumer() throws IOException {
+  public KafkaConsumer<String, GenericRecord> kafkaAvroConsumer(int batchSize) throws IOException {
     log.info(
         "Instantiating the Kafka Avro consumer from the consumer properties file: {}",
         this.consumerPropertiesFilePath);
@@ -55,17 +60,17 @@ public class ConsumerConfig {
     EnvVarInterpolator.interpolate(props);
     // disable auto commit, numaflow data forwarder takes care of committing offsets
     if (props.getProperty(
-                org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)
+                ENABLE_AUTO_COMMIT_CONFIG)
             != null
         && Boolean.parseBoolean(
             props.getProperty(
-                org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))) {
+                ENABLE_AUTO_COMMIT_CONFIG))) {
       log.info("Overwriting enable.auto.commit to false.");
     }
-    props.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+    props.put(ENABLE_AUTO_COMMIT_CONFIG, "false");
     // ensure consumer group id is present
     var groupId =
-        props.getOrDefault(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG, null);
+        props.getOrDefault(GROUP_ID_CONFIG, null);
     if (groupId == null || StringUtils.isBlank((String) groupId)) {
       throw new IllegalArgumentException("group.id is mandatory for Kafka consumer");
     }
@@ -73,11 +78,18 @@ public class ConsumerConfig {
     // override the deserializer
     // TODO - warning message if user sets a different deserializer
     props.put(
-        org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+        KEY_DESERIALIZER_CLASS_CONFIG,
         "org.apache.kafka.common.serialization.StringDeserializer");
     props.put(
-        org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+        VALUE_DESERIALIZER_CLASS_CONFIG,
         "io.confluent.kafka.serializers.KafkaAvroDeserializer");
+
+    // align max.poll.records with the Numaflow batch size so the consumer fetches
+    // exactly as many records as the pipeline requests per read cycle
+    props.put(
+        MAX_POLL_RECORDS_CONFIG,
+        String.valueOf(batchSize));
+    log.info("Setting max.poll.records to {}", batchSize);
 
     // set credential properties from environment variable
     String credentialProperties = System.getenv("KAFKA_CREDENTIAL_PROPERTIES");
@@ -91,7 +103,7 @@ public class ConsumerConfig {
   }
 
   // Kafka byte array consumer client
-  public KafkaConsumer<String, byte[]> kafkaByteArrayConsumer() throws IOException {
+  public KafkaConsumer<String, byte[]> kafkaByteArrayConsumer(int batchSize) throws IOException {
     log.info(
         "Instantiating the Kafka byte array consumer from the consumer properties file: {}",
         this.consumerPropertiesFilePath);
@@ -102,17 +114,17 @@ public class ConsumerConfig {
     EnvVarInterpolator.interpolate(props);
     // disable auto commit, numaflow data forwarder takes care of committing offsets
     if (props.getProperty(
-                org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)
+                ENABLE_AUTO_COMMIT_CONFIG)
             != null
         && Boolean.parseBoolean(
             props.getProperty(
-                org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))) {
+                ENABLE_AUTO_COMMIT_CONFIG))) {
       log.info("Overwriting enable.auto.commit to false.");
     }
-    props.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+    props.put(ENABLE_AUTO_COMMIT_CONFIG, "false");
     // ensure consumer group id is present
     var groupId =
-        props.getOrDefault(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG, null);
+        props.getOrDefault(GROUP_ID_CONFIG, null);
     if (groupId == null || StringUtils.isBlank((String) groupId)) {
       throw new IllegalArgumentException("group.id is mandatory for Kafka consumer");
     }
@@ -120,11 +132,18 @@ public class ConsumerConfig {
     // override the deserializer
     // TODO - warning message if user sets a different deserializer
     props.put(
-        org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+        KEY_DESERIALIZER_CLASS_CONFIG,
         "org.apache.kafka.common.serialization.StringDeserializer");
     props.put(
-        org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+        VALUE_DESERIALIZER_CLASS_CONFIG,
         "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+
+    // align max.poll.records with the Numaflow batch size so the consumer fetches
+    // exactly as many records as the pipeline requests per read cycle
+    props.put(
+        MAX_POLL_RECORDS_CONFIG,
+        String.valueOf(batchSize));
+    log.info("Setting max.poll.records to {}", batchSize);
 
     // set credential properties from environment variable
     String credentialProperties = System.getenv("KAFKA_CREDENTIAL_PROPERTIES");

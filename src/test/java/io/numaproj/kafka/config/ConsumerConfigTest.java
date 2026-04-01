@@ -27,7 +27,7 @@ public class ConsumerConfigTest {
   @Test
   public void consumer_initializeSuccess() {
     try {
-      var kafkaConsumer = underTest.kafkaAvroConsumer();
+      var kafkaConsumer = underTest.kafkaAvroConsumer(500);
       assertNotNull(kafkaConsumer);
     } catch (Exception e) {
       fail();
@@ -46,7 +46,7 @@ public class ConsumerConfigTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          underTest.kafkaAvroConsumer();
+          underTest.kafkaAvroConsumer(500);
         });
   }
 
@@ -61,7 +61,7 @@ public class ConsumerConfigTest {
                         .getResource("consumer/consumer.properties.auto.commit.enabled"))
                 .getPath());
     try {
-      var kafkaConsumer = underTest.kafkaAvroConsumer();
+      var kafkaConsumer = underTest.kafkaAvroConsumer(500);
       assertNotNull(kafkaConsumer);
     } catch (Exception e) {
       fail();
