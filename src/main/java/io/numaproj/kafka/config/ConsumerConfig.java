@@ -28,16 +28,21 @@ public class ConsumerConfig {
     this.consumerPropertiesFilePath = consumerPropertiesFilePath;
   }
 
+  private Properties loadProps() throws IOException {
+    Properties props = new Properties();
+    try (InputStream is = new FileInputStream(this.consumerPropertiesFilePath)) {
+      props.load(is);
+    }
+    EnvVarInterpolator.interpolate(props);
+    return props;
+  }
+
   /**
    * Provides the consumer group ID from consumer.properties file. This is the single source of
    * truth for group.id configuration.
    */
   public String consumerGroupId() throws IOException {
-    Properties props = new Properties();
-    InputStream is = new FileInputStream(this.consumerPropertiesFilePath);
-    props.load(is);
-    is.close();
-    EnvVarInterpolator.interpolate(props);
+    Properties props = loadProps();
 
     var groupId =
         props.getOrDefault(GROUP_ID_CONFIG, null);
@@ -53,11 +58,7 @@ public class ConsumerConfig {
     log.info(
         "Instantiating the Kafka Avro consumer from the consumer properties file: {}",
         this.consumerPropertiesFilePath);
-    Properties props = new Properties();
-    InputStream is = new FileInputStream(this.consumerPropertiesFilePath);
-    props.load(is);
-    is.close();
-    EnvVarInterpolator.interpolate(props);
+    Properties props = loadProps();
     // disable auto commit, numaflow data forwarder takes care of committing offsets
     if (props.getProperty(
                 ENABLE_AUTO_COMMIT_CONFIG)
@@ -107,11 +108,7 @@ public class ConsumerConfig {
     log.info(
         "Instantiating the Kafka byte array consumer from the consumer properties file: {}",
         this.consumerPropertiesFilePath);
-    Properties props = new Properties();
-    InputStream is = new FileInputStream(this.consumerPropertiesFilePath);
-    props.load(is);
-    is.close();
-    EnvVarInterpolator.interpolate(props);
+    Properties props = loadProps();
     // disable auto commit, numaflow data forwarder takes care of committing offsets
     if (props.getProperty(
                 ENABLE_AUTO_COMMIT_CONFIG)
@@ -162,11 +159,7 @@ public class ConsumerConfig {
   // Admin client should be able to serve both consumer and producer,
   // and it does not need all the properties that consumer client needs.
   public AdminClient kafkaAdminClient() throws IOException {
-    Properties props = new Properties();
-    InputStream is = new FileInputStream(this.consumerPropertiesFilePath);
-    props.load(is);
-    is.close();
-    EnvVarInterpolator.interpolate(props);
+    Properties props = loadProps();
     // set credential properties from environment variable
     String credentialProperties = System.getenv("KAFKA_CREDENTIAL_PROPERTIES");
     if (credentialProperties != null && !credentialProperties.isEmpty()) {

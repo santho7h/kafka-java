@@ -33,8 +33,9 @@ public class ProducerConfig {
         "Instantiating the Kafka byte array producer from the producer properties file path: {}",
         this.producerPropertiesFilePath);
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
     // override the serializer
     // TODO - warning message if user sets a different serializer
@@ -55,7 +56,6 @@ public class ProducerConfig {
       sr.close();
       EnvVarInterpolator.interpolate(props);
     }
-    is.close();
     return new KafkaProducer<>(props);
   }
 
@@ -65,8 +65,9 @@ public class ProducerConfig {
         "Instantiating the Kafka Avro producer from the producer properties file path: {}",
         this.producerPropertiesFilePath);
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
     // override the serializer
     // TODO - warning message if user sets a different serializer
@@ -87,7 +88,6 @@ public class ProducerConfig {
       sr.close();
       EnvVarInterpolator.interpolate(props);
     }
-    is.close();
     return new KafkaProducer<>(props);
   }
 
@@ -95,8 +95,9 @@ public class ProducerConfig {
   // It is used when the destination topic has json or avro schema
   public SchemaRegistryClient schemaRegistryClient() throws IOException {
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
 
     // set credential properties from environment variable

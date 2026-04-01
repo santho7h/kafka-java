@@ -38,6 +38,8 @@ public class KafkaApplication {
   private static final String SCHEMA_TYPE_AVRO = "avro";
   private static final String SCHEMA_TYPE_JSON = "json";
 
+  private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
+
   public static void main(String[] args) throws Exception {
     // TODO - validate the arguments, cannot enable both consumer and producer
     log.info("Supplied arguments: {}", (Object) args);
@@ -132,7 +134,13 @@ public class KafkaApplication {
           "--schemaType is required (avro, json, or raw)");
     }
     String schemaSubject = argMap.getOrDefault(KEY_SCHEMA_SUBJECT, "");
-    int schemaVersion = Integer.parseInt(argMap.getOrDefault(KEY_SCHEMA_VERSION, "0"));
+    int schemaVersion;
+    try {
+      schemaVersion = Integer.parseInt(argMap.getOrDefault(KEY_SCHEMA_VERSION, "0"));
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "--schemaVersion must be an integer, got: " + argMap.get(KEY_SCHEMA_VERSION), e);
+    }
     return UserConfig.builder()
         .topicName(topicName)
         .schemaType(schemaType)
@@ -148,6 +156,9 @@ public class KafkaApplication {
     for (String arg : args) {
       if (arg.startsWith(ARG_CONFIG)) {
         configPath = arg.substring(ARG_CONFIG.length());
+        if (configPath.isBlank()) {
+          throw new IllegalArgumentException("--config requires a non-empty file path value");
+        }
       } else if (arg.startsWith(ARG_PREFIX)) {
         int eq = arg.indexOf('=');
         if (eq > 0) {
@@ -162,8 +173,6 @@ public class KafkaApplication {
     }
     return map;
   }
-
-  private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
 
   private static Map<String, String> loadConfigFile(String path) {
     try {

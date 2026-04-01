@@ -84,8 +84,8 @@ public class ByteArraySourcer extends Sourcer {
 
   /** Used in tests to inject a pre-built worker directly, bypassing lazy init */
   @VisibleForTesting
-  void setWorker(ByteArrayWorker w, Thread thread) {
-    this.worker = w;
+  void setWorker(ByteArrayWorker worker, Thread thread) {
+    this.worker = worker;
     this.workerThread = thread;
   }
 

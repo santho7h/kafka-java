@@ -57,6 +57,22 @@ env:
 
 Available levels: `TRACE`, `DEBUG`, `INFO` (default), `WARN`, `ERROR`, `OFF`
 
+To set the log level for only the `io.numaproj.kafka` package (without affecting other libraries), use `KAFKA_LOG_LEVEL`:
+
+```yaml
+env:
+  - name: KAFKA_LOG_LEVEL
+    value: "DEBUG"
+```
+
 #### How do I enable structured logging (JSON)?
 
-Add the `logstash-logback-encoder` dependency and configure a JSON encoder in your `logback.xml`. Refer to the [logstash-logback-encoder documentation](https://github.com/logfellow/logstash-logback-encoder) for dependency coordinates and encoder configuration.
+Set `LOG_FORMAT=json` in your container spec:
+
+```yaml
+env:
+  - name: LOG_FORMAT
+    value: "json"
+```
+
+The value must be exactly `json` (lowercase). Omitting `LOG_FORMAT` or setting it to any other value uses the default plain-text format.

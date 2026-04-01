@@ -1,11 +1,30 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <appender name="STDOUT_PLAIN" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 
-    <root level="${ROOT_LOG_LEVEL:-INFO}">
-        <appender-ref ref="STDOUT"/>
-    </root>
+    <appender name="STDOUT_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
+    </appender>
+
+    <if>
+        <condition class="ch.qos.logback.core.boolex.PropertyEqualityCondition">
+            <key>LOG_FORMAT</key>
+            <value>json</value>
+        </condition>
+        <then>
+            <root level="${ROOT_LOG_LEVEL:-INFO}">
+                <appender-ref ref="STDOUT_JSON"/>
+            </root>
+        </then>
+        <else>
+            <root level="${ROOT_LOG_LEVEL:-INFO}">
+                <appender-ref ref="STDOUT_PLAIN"/>
+            </root>
+        </else>
+    </if>
+
+    <logger name="io.numaproj.kafka" level="${KAFKA_LOG_LEVEL:-INFO}"/>
 </configuration>
