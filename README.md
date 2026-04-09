@@ -57,7 +57,7 @@ env:
 
 Available levels: `TRACE`, `DEBUG`, `INFO` (default), `WARN`, `ERROR`, `OFF`
 
-To set the log level for only the `io.numaproj.kafka` package (without affecting other libraries), use `KAFKA_LOG_LEVEL`:
+To set the log level for only this application's classes (without affecting other libraries), use `KAFKA_LOG_LEVEL`:
 
 ```yaml
 env:
