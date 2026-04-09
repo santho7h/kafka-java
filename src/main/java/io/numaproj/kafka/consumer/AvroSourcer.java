@@ -2,6 +2,8 @@ package io.numaproj.kafka.consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.numaproj.kafka.common.CommonUtils;
+import io.numaproj.kafka.config.ConsumerConfig;
+import io.numaproj.kafka.config.UserConfig;
 import io.numaproj.numaflow.sourcer.*;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -9,7 +11,6 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericDatumWriter;
@@ -20,17 +21,18 @@ import org.apache.avro.io.JsonEncoder;
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 /** AvroSourcer is the implementation of the Numaflow Sourcer to read Avro messages from Kafka */
 @Slf4j
-@Component
-@ConditionalOnProperty(name = "schemaType", havingValue = "avro")
 public class AvroSourcer extends Sourcer {
-  private final AvroWorker avroWorker;
+  private final ConsumerConfig consumerConfig;
+  private final UserConfig userConfig;
   private final Admin admin;
+
+  // Worker and its thread are lazily initialized on the first read() call so that
+  // we can configure max.poll.records from the Numaflow-supplied batch size.
+  // Numaflow does not expose batch size and read timeout before the first ReadRequest arrives.
+  private AvroWorker avroWorker;
   private Thread workerThread;
 
   // readTopicPartitionOffsetMap is used to keep track of the highest offsets read from the current
@@ -39,17 +41,32 @@ public class AvroSourcer extends Sourcer {
   // previous read request.
   private Map<String, Long> readTopicPartitionOffsetMap;
 
-  @Autowired
-  public AvroSourcer(AvroWorker avroWorker, Admin admin) {
-    this.avroWorker = avroWorker;
+  public AvroSourcer(ConsumerConfig consumerConfig, UserConfig userConfig, Admin admin) {
+    this.consumerConfig = consumerConfig;
+    this.userConfig = userConfig;
     this.admin = admin;
   }
 
-  @PostConstruct
-  public void startConsumer() throws Exception {
-    log.info("Starting the Kafka consumer worker thread...");
+  /**
+   * Lazily initializes the consumer worker using the batch size and timeout from the first
+   * ReadRequest so that max.poll.records is aligned with the Numaflow pipeline configuration.
+   */
+  private synchronized void initWorkerIfNeeded(ReadRequest request) throws IOException {
+    if (avroWorker != null) {
+      return;
+    }
+    int batchSize = (int) request.getCount();
+    log.info(
+        "Initializing Avro consumer worker with batchSize={} timeoutMs={}",
+        batchSize,
+        request.getTimeout().toMillis());
+    var kafkaConsumer = consumerConfig.kafkaAvroConsumer(batchSize);
+    avroWorker = new AvroWorker(userConfig, kafkaConsumer);
     workerThread = new Thread(avroWorker, "consumerWorkerThread");
     workerThread.start();
+  }
+
+  public void startConsumer() throws Exception {
     log.info("Initializing Kafka Avro sourcer server...");
     new Server(this).start();
   }
@@ -60,13 +77,20 @@ public class AvroSourcer extends Sourcer {
    * @return boolean if the consumer worker thread is alive
    */
   boolean isWorkerThreadAlive() {
-    return workerThread.isAlive();
+    return workerThread != null && workerThread.isAlive();
   }
 
   /** Used in tests */
   @VisibleForTesting
   void setReadTopicPartitionOffsetMap(Map<String, Long> readTopicPartitionOffsetMap) {
     this.readTopicPartitionOffsetMap = readTopicPartitionOffsetMap;
+  }
+
+  /** Used in tests to inject a pre-built worker directly, bypassing lazy init */
+  @VisibleForTesting
+  void setWorker(AvroWorker worker, Thread thread) {
+    this.avroWorker = worker;
+    this.workerThread = thread;
   }
 
   public void kill(Exception e) {
@@ -76,35 +100,30 @@ public class AvroSourcer extends Sourcer {
 
   @Override
   public void read(ReadRequest request, OutputObserver observer) {
+    try {
+      initWorkerIfNeeded(request);
+    } catch (IOException e) {
+      kill(new RuntimeException("Failed to initialize consumer worker", e));
+      return;
+    }
+
     // check if the consumer worker thread is still alive
     if (!isWorkerThreadAlive()) {
       log.error("Consumer worker thread is not alive, exiting...");
       kill(new RuntimeException("Consumer worker thread is not alive"));
     }
 
-    long startTime;
-    long remainingTime = request.getTimeout().toMillis();
     int j = 0;
-    List<ConsumerRecord<String, GenericRecord>> consumerRecordList = null;
     readTopicPartitionOffsetMap = new HashMap<>();
-    while (j < request.getCount()) {
-      startTime = System.currentTimeMillis();
-      // if the read request has timed out, break the loop
-      if (remainingTime <= 0) {
-        break;
-      }
-      try {
-        consumerRecordList = avroWorker.poll();
-      } catch (InterruptedException e) {
-        // Exit from the loop if the thread is interrupted
-        kill(new RuntimeException(e));
-      }
-      if (consumerRecordList == null) {
-        // update the remaining time
-        remainingTime -= System.currentTimeMillis() - startTime;
-        continue;
-      }
+    List<ConsumerRecord<String, GenericRecord>> consumerRecordList;
+    try {
+      consumerRecordList = avroWorker.poll(request.getTimeout().toMillis());
+    } catch (InterruptedException e) {
+      kill(new RuntimeException(e));
+      return;
+    }
 
+    if (consumerRecordList != null) {
       for (ConsumerRecord<String, GenericRecord> consumerRecord : consumerRecordList) {
         if (consumerRecord == null) {
           continue;
@@ -140,11 +159,8 @@ public class AvroSourcer extends Sourcer {
         } else {
           readTopicPartitionOffsetMap.put(key, consumerRecord.offset());
         }
-        // FIXME - after we finish this for loop, j could be greater than request.getCount(),
-        // meaning we are sending more messages than requested
         j++;
       }
-      remainingTime -= System.currentTimeMillis() - startTime;
     }
     log.debug(
         "BatchRead summary: requested number of messages: {} number of messages sent: {} number of partitions: {} readTopicPartitionOffsetMap:{}",
@@ -213,6 +229,9 @@ public class AvroSourcer extends Sourcer {
 
   @Override
   public List<Integer> getPartitions() {
+    if (avroWorker == null) {
+      return List.of();
+    }
     return avroWorker.getPartitions();
   }
 

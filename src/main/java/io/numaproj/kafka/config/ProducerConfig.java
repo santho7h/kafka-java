@@ -15,39 +15,27 @@ import java.util.Properties;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.Configuration;
 
-/** Beans used by Kafka sinker */
+/** Factory for Kafka producer clients and schema registry */
 @Slf4j
-@Configuration
-@ComponentScan(basePackages = {"io.numaproj.kafka.producer", "io.numaproj.kafka.schema"})
-@ConditionalOnProperty(name = "producer.properties.path")
 public class ProducerConfig {
 
-  @Value("${producer.properties.path:NA}")
-  private String producerPropertiesFilePath;
+  private final String producerPropertiesFilePath;
 
-  // package-private constructor. this is for unit test only.
-  ProducerConfig(@Value("${producer.properties.path:NA}") String producerPropertiesFilePath) {
+  public ProducerConfig(String producerPropertiesFilePath) {
     this.producerPropertiesFilePath = producerPropertiesFilePath;
   }
 
   // Kafka producer client to publish raw data in byte array format to Kafka
   // It is used when the destination topic has no schema or json schema
-  @Bean
-  @ConditionalOnExpression("'${schemaType}'.equals('json') or '${schemaType}'.equals('raw')")
   public KafkaProducer<String, byte[]> kafkaByteArrayProducer() throws IOException {
     log.info(
         "Instantiating the Kafka byte array producer from the producer properties file path: {}",
         this.producerPropertiesFilePath);
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
     // override the serializer
     // TODO - warning message if user sets a different serializer
@@ -68,20 +56,18 @@ public class ProducerConfig {
       sr.close();
       EnvVarInterpolator.interpolate(props);
     }
-    is.close();
     return new KafkaProducer<>(props);
   }
 
   // Kafka producer client for Avro
-  @Bean
-  @ConditionalOnProperty(name = "schemaType", havingValue = "avro")
   public KafkaProducer<String, GenericRecord> kafkaAvroProducer() throws IOException {
     log.info(
         "Instantiating the Kafka Avro producer from the producer properties file path: {}",
         this.producerPropertiesFilePath);
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
     // override the serializer
     // TODO - warning message if user sets a different serializer
@@ -102,18 +88,16 @@ public class ProducerConfig {
       sr.close();
       EnvVarInterpolator.interpolate(props);
     }
-    is.close();
     return new KafkaProducer<>(props);
   }
 
   // Schema registry client
   // It is used when the destination topic has json or avro schema
-  @Bean
-  @ConditionalOnExpression("'${schemaType}'.equals('json') or '${schemaType}'.equals('avro')")
   public SchemaRegistryClient schemaRegistryClient() throws IOException {
     Properties props = new Properties();
-    InputStream is = new FileInputStream(this.producerPropertiesFilePath);
-    props.load(is);
+    try (InputStream is = new FileInputStream(this.producerPropertiesFilePath)) {
+      props.load(is);
+    }
     EnvVarInterpolator.interpolate(props);
 
     // set credential properties from environment variable
@@ -137,8 +121,6 @@ public class ProducerConfig {
         schemaRegistryUrl, identityMapCapacity, schemaRegistryClientConfigs);
   }
 
-  @Bean
-  @ConditionalOnExpression("'${schemaType}'.equals('json') or '${schemaType}'.equals('avro')")
   public Registry schemaRegistry(SchemaRegistryClient schemaRegistryClient) {
     return new ConfluentRegistry(schemaRegistryClient);
   }

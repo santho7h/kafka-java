@@ -2,30 +2,33 @@ package io.numaproj.kafka.consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.numaproj.kafka.common.CommonUtils;
+import io.numaproj.kafka.config.ConsumerConfig;
+import io.numaproj.kafka.config.UserConfig;
 import io.numaproj.numaflow.sourcer.*;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.stereotype.Component;
 
 /**
  * ByteArraySourcer is the implementation of the Numaflow Sourcer to read raw messages in byte array
  * format from Kafka
  */
 @Slf4j
-@Component
-@ConditionalOnExpression("'${schemaType}'.equals('json') or '${schemaType}'.equals('raw')")
 public class ByteArraySourcer extends Sourcer {
-  private final ByteArrayWorker worker;
+  private final ConsumerConfig consumerConfig;
+  private final UserConfig userConfig;
   private final Admin admin;
+
+  // Worker and its thread are lazily initialized on the first read() call so that
+  // we can configure max.poll.records from the Numaflow-supplied batch size.
+  // Numaflow does not expose batch size and read timeout before the first ReadRequest arrives.
+  private ByteArrayWorker worker;
   private Thread workerThread;
 
   // readTopicPartitionOffsetMap is used to keep track of the highest offsets read from the current
@@ -34,17 +37,32 @@ public class ByteArraySourcer extends Sourcer {
   // previous read request.
   private Map<String, Long> readTopicPartitionOffsetMap;
 
-  @Autowired
-  public ByteArraySourcer(ByteArrayWorker worker, Admin admin) {
-    this.worker = worker;
+  public ByteArraySourcer(ConsumerConfig consumerConfig, UserConfig userConfig, Admin admin) {
+    this.consumerConfig = consumerConfig;
+    this.userConfig = userConfig;
     this.admin = admin;
   }
 
-  @PostConstruct
-  public void startConsumer() throws Exception {
-    log.info("Starting the Kafka byte array consumer worker thread...");
+  /**
+   * Lazily initializes the consumer worker using the batch size and timeout from the first
+   * ReadRequest so that max.poll.records is aligned with the Numaflow pipeline configuration.
+   */
+  private synchronized void initWorkerIfNeeded(ReadRequest request) throws IOException {
+    if (worker != null) {
+      return;
+    }
+    int batchSize = (int) request.getCount();
+    log.info(
+        "Initializing byte array consumer worker with batchSize={} timeoutMs={}",
+        batchSize,
+        request.getTimeout().toMillis());
+    var kafkaConsumer = consumerConfig.kafkaByteArrayConsumer(batchSize);
+    worker = new ByteArrayWorker(userConfig, kafkaConsumer);
     workerThread = new Thread(worker, "consumerWorkerThread");
     workerThread.start();
+  }
+
+  public void startConsumer() throws Exception {
     log.info("Initializing Kafka byte array sourcer server...");
     new Server(this).start();
   }
@@ -55,13 +73,20 @@ public class ByteArraySourcer extends Sourcer {
    * @return boolean if the consumer worker thread is alive
    */
   boolean isWorkerThreadAlive() {
-    return workerThread.isAlive();
+    return workerThread != null && workerThread.isAlive();
   }
 
   /** Used in tests */
   @VisibleForTesting
   void setReadTopicPartitionOffsetMap(Map<String, Long> readTopicPartitionOffsetMap) {
     this.readTopicPartitionOffsetMap = readTopicPartitionOffsetMap;
+  }
+
+  /** Used in tests to inject a pre-built worker directly, bypassing lazy init */
+  @VisibleForTesting
+  void setWorker(ByteArrayWorker worker, Thread thread) {
+    this.worker = worker;
+    this.workerThread = thread;
   }
 
   public void kill(Exception e) {
@@ -71,35 +96,30 @@ public class ByteArraySourcer extends Sourcer {
 
   @Override
   public void read(ReadRequest request, OutputObserver observer) {
+    try {
+      initWorkerIfNeeded(request);
+    } catch (IOException e) {
+      kill(new RuntimeException("Failed to initialize consumer worker", e));
+      return;
+    }
+
     // check if the consumer worker thread is still alive
     if (!isWorkerThreadAlive()) {
       log.error("Consumer worker thread is not alive, exiting...");
       kill(new RuntimeException("Consumer worker thread is not alive"));
     }
 
-    long startTime;
-    long remainingTime = request.getTimeout().toMillis();
     int j = 0;
-    List<ConsumerRecord<String, byte[]>> consumerRecordList = null;
     readTopicPartitionOffsetMap = new HashMap<>();
-    while (j < request.getCount()) {
-      startTime = System.currentTimeMillis();
-      // if the read request has timed out, break the loop
-      if (remainingTime <= 0) {
-        break;
-      }
-      try {
-        consumerRecordList = worker.poll();
-      } catch (InterruptedException e) {
-        // Exit from the loop if the thread is interrupted
-        kill(new RuntimeException(e));
-      }
-      if (consumerRecordList == null) {
-        // update the remaining time
-        remainingTime -= System.currentTimeMillis() - startTime;
-        continue;
-      }
+    List<ConsumerRecord<String, byte[]>> consumerRecordList;
+    try {
+      consumerRecordList = worker.poll(request.getTimeout().toMillis());
+    } catch (InterruptedException e) {
+      kill(new RuntimeException(e));
+      return;
+    }
 
+    if (consumerRecordList != null) {
       for (ConsumerRecord<String, byte[]> consumerRecord : consumerRecordList) {
         if (consumerRecord == null) {
           continue;
@@ -129,11 +149,8 @@ public class ByteArraySourcer extends Sourcer {
         } else {
           readTopicPartitionOffsetMap.put(key, consumerRecord.offset());
         }
-        // FIXME - after we finish this for loop, j could be greater than request.getCount(),
-        // meaning we are sending more messages than requested
         j++;
       }
-      remainingTime -= System.currentTimeMillis() - startTime;
     }
     log.debug(
         "BatchRead summary: requested number of messages: {} number of messages sent: {} number of partitions: {} readTopicPartitionOffsetMap:{}",
@@ -202,6 +219,9 @@ public class ByteArraySourcer extends Sourcer {
 
   @Override
   public List<Integer> getPartitions() {
+    if (worker == null) {
+      return List.of();
+    }
     return worker.getPartitions();
   }
 }
