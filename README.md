@@ -67,12 +67,14 @@ env:
 
 #### How do I enable structured logging (JSON)?
 
-Set `LOG_FORMAT=json` in your container spec:
+The application ships with a `logback-json.xml` that produces structured JSON logs via the
+[logstash-logback-encoder](https://github.com/logfellow/logstash-logback-encoder). To activate it,
+set `JAVA_TOOL_OPTIONS` in your container spec to point Logback at the JSON config file:
 
 ```yaml
 env:
-  - name: LOG_FORMAT
-    value: "json"
+  - name: JAVA_TOOL_OPTIONS
+    value: "-Dlogback.configurationFile=/app/resources/logback-json.xml"
 ```
 
-The value must be exactly `json` (lowercase). Omitting `LOG_FORMAT` or setting it to any other value uses the default plain-text format.
+Omitting `JAVA_TOOL_OPTIONS` uses the default plain-text format.
