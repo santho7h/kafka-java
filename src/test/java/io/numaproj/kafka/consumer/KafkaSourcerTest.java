@@ -21,6 +21,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -220,21 +222,22 @@ class KafkaSourcerTest {
   }
 
   @Test
-  void ack_commitsOffsets() throws Exception {
+  void ack_commitsTheAckedOffsetsPlusOne() throws Exception {
     underTest.ack(ackRequest());
-    verify(worker).commit();
+    // ackRequest() acks offset 1 on partition 10, so the next offset to consume is 2.
+    verify(worker).commit(Map.of(new TopicPartition(TOPIC, 10), new OffsetAndMetadata(2)));
   }
 
   @Test
   void ack_whenOutOfSyncWithRead_stillCommits() throws Exception {
     underTest.setReadTopicPartitionOffsetMap(Map.of("test-topic:10", 100L));
     underTest.ack(ackRequest());
-    verify(worker).commit();
+    verify(worker).commit(anyMap());
   }
 
   @Test
   void ack_whenCommitInterrupted_thenKills() throws Exception {
-    doThrow(new InterruptedException("boom")).when(worker).commit();
+    doThrow(new InterruptedException("boom")).when(worker).commit(anyMap());
     doNothing().when(underTest).kill(any());
     underTest.ack(ackRequest());
     verify(underTest).kill(any(RuntimeException.class));
@@ -321,7 +324,7 @@ class KafkaSourcerTest {
     // Numaflow acks only offset 5, the one record it received.
     List<ILoggingEvent> errors = captureErrors(() -> sourcer.ack(ackRequest(1, 5L)));
     assertEquals(List.of(), errors, "read and ack must agree when a record is skipped");
-    verify(worker).commit();
+    verify(worker).commit(Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(6)));
   }
 
   @Test
@@ -340,21 +343,21 @@ class KafkaSourcerTest {
   void read_whenABatchIsFullySkipped_thenTheFollowingBatchAckCommitsPastIt() throws Exception {
     KafkaSourcer<byte[]> sourcer = sourcer(formatFailingOnBadValue(), OnError.SKIP, worker);
 
-    // Nothing is forwarded, so no ack arrives: Numaflow only acks offsets it received, and so the
-    // consumer position past offset 6 stays uncommitted for now.
+    // Nothing is forwarded, so no ack arrives: Numaflow only acks offsets it received, and so
+    // offset 6 stays uncommitted for now.
     when(worker.poll(anyLong())).thenReturn(List.of(record(6, "bad")));
     sourcer.read(readRequest(1), observer);
 
     verify(observer, never()).send(any());
-    verify(worker, never()).commit();
+    verify(worker, never()).commit(anyMap());
 
-    // The next batch carries a readable record, and its ack commits the position - by then already
-    // past offset 6.
+    // The next batch carries a readable record, and committing its acked offset covers the
+    // skipped offset 6.
     when(worker.poll(anyLong())).thenReturn(List.of(record(7, "good")));
     sourcer.read(readRequest(1), observer);
 
     List<ILoggingEvent> errors = captureErrors(() -> sourcer.ack(ackRequest(1, 7L)));
     assertEquals(List.of(), errors);
-    verify(worker).commit();
+    verify(worker).commit(Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(8)));
   }
 }

@@ -18,6 +18,8 @@ import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 
 /**
@@ -129,9 +131,10 @@ public class KafkaSourcer<V> extends Sourcer {
         }
         Optional<byte[]> payload = toPayload(consumerRecord);
         if (payload.isEmpty()) {
-          // Not tracked: Numaflow never received this record, so no ack will reference it. The
-          // committed offset is unaffected - commitAsync() commits the consumer's position,
-          // which is already past this record.
+          // Not tracked: Numaflow never received this record, so no ack will reference it and it
+          // is committed only once a later record on the partition is acked. Unlike a record
+          // skipped during poll, it cannot be committed here: later records in this batch are
+          // still unacknowledged, so committing past it would claim them too.
           continue;
         }
         observer.send(toMessage(consumerRecord, payload.get()));
@@ -222,13 +225,30 @@ public class KafkaSourcer<V> extends Sourcer {
         request.getOffsets().size(),
         topicPartitionOffsetMap);
     try {
-      worker.commit();
+      worker.commit(toOffsetsToCommit(request));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       kill(new RuntimeException(e));
     } catch (RuntimeException e) {
       kill(e);
     }
+  }
+
+  /**
+   * Maps each acknowledged partition to the next offset to consume (highest acknowledged + 1).
+   * Committing these, rather than the consumer position, ties the committed offset to what
+   * Numaflow has acknowledged instead of relying on reads never running ahead of acks.
+   */
+  private static Map<TopicPartition, OffsetAndMetadata> toOffsetsToCommit(AckRequest request) {
+    Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = new HashMap<>();
+    for (Offset offset : request.getOffsets()) {
+      String[] topicOffset = new String(offset.getValue(), StandardCharsets.UTF_8).split(":");
+      TopicPartition tp = new TopicPartition(topicOffset[0], offset.getPartitionId());
+      long next = Long.parseLong(topicOffset[1]) + 1;
+      offsetsToCommit.merge(
+          tp, new OffsetAndMetadata(next), (a, b) -> a.offset() >= b.offset() ? a : b);
+    }
+    return offsetsToCommit;
   }
 
   private static Map<String, Long> getPartitionToHighestOffsetMap(AckRequest request) {

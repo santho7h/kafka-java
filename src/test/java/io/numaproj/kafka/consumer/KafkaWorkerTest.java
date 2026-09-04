@@ -11,9 +11,11 @@ import java.util.*;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetCommitCallback;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.RecordDeserializationException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.AfterEach;
@@ -104,6 +106,7 @@ class KafkaWorkerTest {
     assertThrows(RecordDeserializationException.class, () -> worker.poll(1000));
 
     verify(consumer, never()).seek(any(), anyLong());
+    verify(consumer, never()).commitSync(anyMap());
     verify(metrics, never()).recordSkipped();
   }
 
@@ -122,6 +125,28 @@ class KafkaWorkerTest {
     List<ConsumerRecord<String, byte[]>> next = skipWorker.poll(1000);
 
     verify(consumer).seek(new TopicPartition(TOPIC, 1), 6L);
+    verify(consumer).commitSync(Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(6L)));
+    verify(metrics).recordSkipped();
+    assertEquals(List.of(), skipped);
+    assertEquals(1, next.size());
+    skipThread.interrupt();
+  }
+
+  @Test
+  void poll_whenTheSkipCommitFails_thenTheSkipStillSucceeds() throws Exception {
+    // The seek has already moved the consumer past the record, so a failed commit costs only the
+    // re-skip on a restart - it must not fail the read.
+    when(consumer.poll(any()))
+        .thenThrow(deserializationException(5L, new RuntimeException("bad")))
+        .thenReturn(records("good"));
+    doThrow(new TimeoutException("commit timed out")).when(consumer).commitSync(anyMap());
+    KafkaWorker<byte[]> skipWorker = worker(OnError.SKIP);
+    Thread skipThread = new Thread(skipWorker);
+    skipThread.start();
+
+    List<ConsumerRecord<String, byte[]>> skipped = skipWorker.poll(1000);
+    List<ConsumerRecord<String, byte[]>> next = skipWorker.poll(1000);
+
     verify(metrics).recordSkipped();
     assertEquals(List.of(), skipped);
     assertEquals(1, next.size());
@@ -144,6 +169,8 @@ class KafkaWorkerTest {
 
     verify(consumer).seek(new TopicPartition(TOPIC, 1), 6L);
     verify(consumer).seek(new TopicPartition(TOPIC, 1), 7L);
+    verify(consumer).commitSync(Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(6L)));
+    verify(consumer).commitSync(Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(7L)));
     verify(metrics, times(2)).recordSkipped();
     assertEquals(1, got.size());
     skipThread.interrupt();
@@ -214,10 +241,12 @@ class KafkaWorkerTest {
   }
 
   @Test
-  void commit_delegatesToConsumer() throws Exception {
+  void commit_delegatesToConsumerWithTheGivenOffsets() throws Exception {
     thread.start();
-    worker.commit();
-    verify(consumer).commitAsync(any(OffsetCommitCallback.class));
+    Map<TopicPartition, OffsetAndMetadata> offsets =
+        Map.of(new TopicPartition(TOPIC, 1), new OffsetAndMetadata(42));
+    worker.commit(offsets);
+    verify(consumer).commitAsync(eq(offsets), any(OffsetCommitCallback.class));
   }
 
   @Test

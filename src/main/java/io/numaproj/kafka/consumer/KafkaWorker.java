@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -15,6 +16,8 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.RecordDeserializationException;
 
@@ -63,7 +66,7 @@ public class KafkaWorker<V> implements Runnable {
         try {
           switch (request.type) {
             case POLL -> pollRecords(request.timeoutMs);
-            case COMMIT -> commitAsync();
+            case COMMIT -> commitAsync(request.offsetsToCommit);
             case SHUTDOWN -> {
               log.info("shutting down the consumer");
               keepRunning = false;
@@ -85,8 +88,8 @@ public class KafkaWorker<V> implements Runnable {
 
   /**
    * Polls once for the given timeout. Under {@code onError: skip} a record that cannot be
-   * deserialized is counted, logged and sought past, and the batch comes back empty; under {@code
-   * onError: fail} the failure is rethrown.
+   * deserialized is counted, logged, sought past and committed, and the batch comes back empty;
+   * under {@code onError: fail} the failure is rethrown.
    *
    * @throws RecordDeserializationException if a record could not be deserialized and {@code onError}
    *     is not {@code skip}
@@ -117,13 +120,34 @@ public class KafkaWorker<V> implements Runnable {
       // before this offset was already handed back by an earlier poll and none is dropped here.
       // It then retries this same offset on every poll, so seek past it to make progress.
       consumer.seek(e.topicPartition(), e.offset() + 1);
+      commitSkipped(e.topicPartition(), e.offset());
       // Nothing to hand over: the next read resumes past the drop.
       consumerRecordList = List.of();
     }
   }
 
-  private void commitAsync() {
+  /**
+   * Commits the skipped record as terminally handled, so a restart resumes past it instead of
+   * re-reading and re-skipping it. A failed commit needs no retry: the seek has already moved the
+   * live consumer past the record, and the next acknowledged batch commits an offset beyond it.
+   */
+  private void commitSkipped(TopicPartition topicPartition, long skippedOffset) {
+    Map<TopicPartition, OffsetAndMetadata> offsets =
+        Map.of(topicPartition, new OffsetAndMetadata(skippedOffset + 1));
+    try {
+      consumer.commitSync(offsets);
+      log.debug("offsets committed for the skipped record: {}", offsets);
+    } catch (KafkaException e) {
+      log.warn(
+          "failed to commit the skipped record, the next acknowledged batch will commit past it: Offsets:{}",
+          offsets,
+          e);
+    }
+  }
+
+  private void commitAsync(Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
     consumer.commitAsync(
+        offsetsToCommit,
         (offsets, exception) -> {
           if (exception != null) {
             log.error("error while committing offsets: Offsets:{}", offsets, exception);
@@ -147,12 +171,17 @@ public class KafkaWorker<V> implements Runnable {
   }
 
   /**
-   * Requests the worker thread to commit offsets and blocks until it completes.
+   * Requests the worker thread to commit the given offsets and blocks until it completes.
+   * Committing exactly the acknowledged offsets, rather than the consumer position, keeps the
+   * committed offset correct even if a read were ever issued before the previous batch is
+   * acknowledged.
    *
+   * @param offsetsToCommit per partition, the next offset to consume (highest acknowledged + 1)
    * @throws InterruptedException if the calling thread is interrupted
    */
-  public void commit() throws InterruptedException {
-    await(new OperationRequest(TaskType.COMMIT));
+  public void commit(Map<TopicPartition, OffsetAndMetadata> offsetsToCommit)
+      throws InterruptedException {
+    await(new OperationRequest(TaskType.COMMIT, offsetsToCommit));
   }
 
   /**
@@ -200,10 +229,19 @@ public class KafkaWorker<V> implements Runnable {
     }
   }
 
-  /** A task for the worker thread to perform, with the poll timeout it needs. */
-  private record OperationRequest(TaskType type, long timeoutMs) {
+  /** A task for the worker thread to perform, with the arguments it needs. */
+  private record OperationRequest(
+      TaskType type, long timeoutMs, Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
     OperationRequest(TaskType type) {
-      this(type, 0);
+      this(type, 0, null);
+    }
+
+    OperationRequest(TaskType type, long timeoutMs) {
+      this(type, timeoutMs, null);
+    }
+
+    OperationRequest(TaskType type, Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
+      this(type, 0, offsetsToCommit);
     }
   }
 
